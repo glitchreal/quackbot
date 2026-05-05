@@ -28,6 +28,20 @@ npm start
 - The bot auto-checks links in channel `1479215541506932746`.
 - Users can run `/bypass link:<url>` to bypass a supported link.
 - Use `/bypass link:<url> refresh:true` to skip the BypassTools cache.
+- Successful bypasses include a `Mobile copy` button that privately shows the raw URL to the requester.
+- Unsupported or failed links show examples of supported link types.
+
+BypassTools is for ad-link, key-system, and social-unlock services. Examples include Linkvertise, LootLabs/LootLinks/loot.link, Work.ink, Delta Executor keys, Hydrogen, Luarmor, Lockr.so, Rapid-Links, shortlinks, and other key systems. Normal media pages like Tenor gifs are not bypass targets.
+
+## Chatlog Style Examples
+
+The bot loads extra QuackQuack style examples from any of these paths on startup:
+
+- `chatlogs.txt`
+- `quack-chatlogs.txt`
+- `.txt`, `.log`, or `.md` files inside `chatlogs/`
+
+These examples are used in the system prompt as style guidance, not real model training.
 
 ## Commands
 

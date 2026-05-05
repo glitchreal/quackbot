@@ -10,7 +10,17 @@
  *   npm start
  */
 
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  Client,
+  GatewayIntentBits,
+  PermissionFlagsBits,
+  REST,
+  Routes,
+  SlashCommandBuilder,
+} = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
@@ -31,11 +41,13 @@ const CONFIG = {
   GROQ_API_KEY: env.GROQ_API_KEY,
   BYPASSTOOLS_API_KEY: env.BYPASSTOOLS_API_KEY,
   BYPASSTOOLS_BASE_URL: env.BYPASSTOOLS_BASE_URL || 'https://api.bypass.tools/api/v1',
+  GROQ_MODEL: env.GROQ_MODEL || 'llama-3.1-8b-instant',
   KEEP_HISTORY: 10,         // messages kept per channel in memory (no Discord fetching)
   HISTORY_TTL: 45 * 60000, // 45 min idle before memory wipes
   AUTO_RESPOND_CHANNELS: parseIdList(env.AUTO_RESPOND_CHANNELS, ['1479215541506932746']), // responds to ALL messages here, no ping needed
   LINK_WATCH_CHANNELS: parseIdList(env.LINK_WATCH_CHANNELS, ['1479215541506932746']), // auto-bypasses links here
   MAX_LINKS_PER_MESSAGE: Number(env.MAX_LINKS_PER_MESSAGE || 3),
+  COPY_BUTTON_TTL: Number(env.COPY_BUTTON_TTL || 30 * 60000),
   TICKET_CATEGORY_ID: '1428240443237335131',       // TicketKing category — bot greets new tickets here
   TICKET_MSG_FILE: path.join(__dirname, 'ticket-message.txt'), // persists the custom greeting across restarts
   RULES_CHANNEL_ID: '1428274192385839197',           // #rules channel users must read
@@ -101,6 +113,7 @@ function saveTicketMessage(msg) {
 // Stores last N messages per channel. No Discord API calls needed — faster and
 // uses way fewer tokens than re-fetching the channel every time.
 const memory = new Map(); // channelId -> { messages: [{role, content}], lastActive }
+const copyPayloads = new Map(); // customId -> { userId, text, expiresAt }
 
 setInterval(() => {
   const now = Date.now();
@@ -108,6 +121,13 @@ setInterval(() => {
     if (now - hist.lastActive > CONFIG.HISTORY_TTL) memory.delete(id);
   }
 }, 10 * 60000);
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, payload] of copyPayloads.entries()) {
+    if (payload.expiresAt < now) copyPayloads.delete(id);
+  }
+}, 5 * 60000);
 
 function getHistory(channelId) {
   if (!memory.has(channelId)) {
@@ -125,6 +145,37 @@ function pushHistory(channelId, role, content) {
     hist.messages = hist.messages.slice(-CONFIG.KEEP_HISTORY * 2);
   }
 }
+
+function loadChatlogExamples() {
+  const files = [
+    path.join(__dirname, 'chatlogs.txt'),
+    path.join(__dirname, 'quack-chatlogs.txt'),
+  ];
+  const chatlogDir = path.join(__dirname, 'chatlogs');
+
+  if (fs.existsSync(chatlogDir)) {
+    for (const file of fs.readdirSync(chatlogDir)) {
+      if (/\.(txt|log|md)$/i.test(file)) files.push(path.join(chatlogDir, file));
+    }
+  }
+
+  const chunks = [];
+  for (const file of files) {
+    try {
+      if (!fs.existsSync(file) || !fs.statSync(file).isFile()) continue;
+      const content = fs.readFileSync(file, 'utf8').trim();
+      if (content) chunks.push(content);
+    } catch (err) {
+      console.error(`Failed to load chatlog examples from ${file}:`, err);
+    }
+  }
+
+  if (!chunks.length) return '';
+
+  return chunks.join('\n').slice(0, 12000);
+}
+
+const CHATLOG_EXAMPLES = loadChatlogExamples();
 
 // ─── QUACKQUACK SYSTEM PROMPT ────────────────────────────────────────────────
 // Lean version — personality + rules only, no bulky training examples.
@@ -217,7 +268,8 @@ Terms: TAD alt = honey buff alt | ugphone = multi-Android emulator | lv 20 = max
 - Max 4 lines total per reply. Usually 1-2.
 - No bullet points, no lists, no headers in replies
 - No "Hello!" "Sure!" "Of course!" "Great question!"
-- No random catchphrases — only use them when they actually fit the context`;
+- No random catchphrases — only use them when they actually fit the context
+${CHATLOG_EXAMPLES ? `\n━━━ REAL CHATLOG EXAMPLES ━━━\nUse these as style examples only. Do not quote them randomly.\n${CHATLOG_EXAMPLES}` : ''}`;
 
 // ─── GROQ CALL ────────────────────────────────────────────────────────────────
 async function askGroq(channelId, username, currentMessage) {
@@ -242,7 +294,7 @@ async function askGroq(channelId, username, currentMessage) {
           'Authorization': `Bearer ${CONFIG.GROQ_API_KEY}`,
         },
         body: JSON.stringify({
-          model: 'llama-3.1-8b-instant', // 8b = 6x higher TPM limit than 70b on free tier
+          model: CONFIG.GROQ_MODEL,
           messages,
           temperature: 0.85,
           max_tokens: 120, // QQ never writes long replies anyway
@@ -282,6 +334,11 @@ async function askGroq(channelId, username, currentMessage) {
 }
 
 // ─── BYPASSTOOLS API ─────────────────────────────────────────────────────────
+const SUPPORTED_LINKS_TEXT = [
+  'Supported links are ad-link/key-system/social-unlock sites, not normal media pages like Tenor gifs.',
+  'Known examples: Linkvertise, LootLabs/LootLinks/loot.link, Work.ink, Delta Executor keys, Hydrogen, Luarmor, Lockr.so, Rapid-Links, shortlinks, and other key systems.',
+].join('\n');
+
 function extractUrls(text) {
   const matches = text.match(/https?:\/\/[^\s<>()]+/gi) || [];
   const cleaned = matches.map(url => url.replace(/[.,!?;:)\]}>"']+$/g, ''));
@@ -306,6 +363,7 @@ async function bypassUrl(url, refresh = false) {
     const message = data.message || `BypassTools returned HTTP ${res.status}`;
     const err = new Error(message);
     err.status = res.status;
+    err.apiStatus = data.status;
     throw err;
   }
 
@@ -318,26 +376,74 @@ async function bypassUrl(url, refresh = false) {
   };
 }
 
+function isProbablyUnsupported(err) {
+  const message = String(err?.message || '').toLowerCase();
+  return err?.status === 400 ||
+    err?.status === 404 ||
+    err?.status === 500 ||
+    message.includes('unsupported') ||
+    message.includes('invalid_url') ||
+    message.includes('invalid url') ||
+    message.includes('all providers exhausted') ||
+    message.includes('internal server error');
+}
+
+function formatBypassFailure(url, err) {
+  const reason = err?.message || 'unknown error';
+  if (!isProbablyUnsupported(err)) return `couldnt bypass ${url}: ${reason}`;
+
+  return [
+    `couldnt bypass ${url}: unsupported or failed`,
+    SUPPORTED_LINKS_TEXT,
+  ].join('\n');
+}
+
 function formatBypassResult(result) {
   const details = [];
   if (result.cached) details.push('cached');
   if (typeof result.processTime === 'number') details.push(`${result.processTime}ms`);
 
   const suffix = details.length ? ` (${details.join(', ')})` : '';
-  return `bypassed${suffix}: ${result.resultUrl}`;
+  return `bypassed${suffix}:\n${result.resultUrl}`;
+}
+
+function createCopyButton(userId, text) {
+  const id = `copy:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`;
+  copyPayloads.set(id, {
+    userId,
+    text,
+    expiresAt: Date.now() + CONFIG.COPY_BUTTON_TTL,
+  });
+
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(id)
+      .setLabel('Mobile copy')
+      .setStyle(ButtonStyle.Secondary)
+  );
+}
+
+function buildBypassReply(userId, result) {
+  return {
+    content: formatBypassResult(result),
+    components: [createCopyButton(userId, result.resultUrl)],
+    allowedMentions: { parse: [] },
+  };
 }
 
 async function bypassLinksForMessage(msg, urls) {
   const selected = urls.slice(0, CONFIG.MAX_LINKS_PER_MESSAGE);
   const lines = [];
+  const copyableResults = [];
 
   for (const url of selected) {
     try {
       const result = await bypassUrl(url);
       lines.push(formatBypassResult(result));
+      copyableResults.push(result.resultUrl);
     } catch (err) {
       console.error(`Bypass failed for ${url}:`, err);
-      lines.push(`couldnt bypass ${url}: ${err.message || 'unknown error'}`);
+      lines.push(formatBypassFailure(url, err));
     }
   }
 
@@ -345,8 +451,13 @@ async function bypassLinksForMessage(msg, urls) {
     lines.push(`skipped ${urls.length - selected.length} extra link(s)`);
   }
 
+  const components = copyableResults.length
+    ? [createCopyButton(msg.author.id, copyableResults.join('\n'))]
+    : [];
+
   await msg.reply({
     content: lines.join('\n'),
+    components,
     allowedMentions: { parse: [] },
   });
 }
@@ -446,6 +557,25 @@ client.on('channelCreate', async (channel) => {
 
 // ─── SLASH COMMAND HANDLER ────────────────────────────────────────────────────
 client.on('interactionCreate', async (interaction) => {
+  if (interaction.isButton() && interaction.customId.startsWith('copy:')) {
+    const payload = copyPayloads.get(interaction.customId);
+
+    if (!payload || payload.expiresAt < Date.now()) {
+      copyPayloads.delete(interaction.customId);
+      return interaction.reply({ content: 'that copy button expired', ephemeral: true });
+    }
+
+    if (payload.userId !== interaction.user.id) {
+      return interaction.reply({ content: 'this copy button isnt for u', ephemeral: true });
+    }
+
+    return interaction.reply({
+      content: payload.text,
+      ephemeral: true,
+      allowedMentions: { parse: [] },
+    });
+  }
+
   if (!interaction.isChatInputCommand()) return;
 
   if (interaction.commandName === 'bypass') {
@@ -461,10 +591,10 @@ client.on('interactionCreate', async (interaction) => {
 
     try {
       const result = await bypassUrl(urls[0], refresh);
-      return interaction.editReply(formatBypassResult(result));
+      return interaction.editReply(buildBypassReply(interaction.user.id, result));
     } catch (err) {
       console.error(`Slash bypass failed for ${urls[0]}:`, err);
-      return interaction.editReply(`couldnt bypass that link: ${err.message || 'unknown error'}`);
+      return interaction.editReply(formatBypassFailure(urls[0], err));
     }
   }
 
