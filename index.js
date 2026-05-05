@@ -15,6 +15,7 @@ const {
   ButtonBuilder,
   ButtonStyle,
   Client,
+  EmbedBuilder,
   GatewayIntentBits,
   PermissionFlagsBits,
   REST,
@@ -334,10 +335,110 @@ async function askGroq(channelId, username, currentMessage) {
 }
 
 // ─── BYPASSTOOLS API ─────────────────────────────────────────────────────────
-const SUPPORTED_LINKS_TEXT = [
-  'Supported links are ad-link/key-system/social-unlock sites, not normal media pages like Tenor gifs.',
-  'Known examples: Linkvertise, LootLabs/LootLinks/loot.link, Work.ink, Delta Executor keys, Hydrogen, Luarmor, Lockr.so, Rapid-Links, shortlinks, and other key systems.',
-].join('\n');
+const SUPPORTED_CATEGORIES = [
+  {
+    name: 'Executor Key Systems',
+    description: 'Executors and exploit key systems we can bypass.',
+    count: 10,
+    services: [
+      ['Platoboost', 'auth.platorelay.com, gateway.platoboost.com'],
+      ['Pandadevelopment', 'pandadevelopment.net, new.pandadevelopment.net'],
+      ['Trigon', 'trigonevo.com'],
+      ['Violated', 'violated.lol'],
+      ['Blox-script', 'blox-script.com, boblox-script.com'],
+      ['Hydrogen', 'hydrogen.lat'],
+      ['Codex', 'mobile.codex.lol'],
+      ['Delta', 'delta-executor.com'],
+      ['Vega X', 'vegax.gg'],
+      ['Ad-Link', 'ad-link.link'],
+    ],
+  },
+  {
+    name: 'Ad-Shorteners',
+    description: 'Standard ad-shorteners and revenue links.',
+    count: 24,
+    services: [
+      ['Linkvertise', 'linkvertise.com, link-to.net, link-hub.net, +3 more'],
+      ['AdMaven / LootLabs', 'loot-link.com, lootdest.org, free-content.pro, +5 more'],
+      ['Work.ink', 'work.ink, workink.net'],
+      ['Fly.inc', 'rinku.pro, 7mb.io'],
+      ['Shrtfly', 'stfly.vip, shrtslug.biz'],
+      ['Lockrso', 'lockr.so, lockr.net'],
+      ['Linkunlocker', 'linkunlocker.com'],
+      ['Link-unlock', 'link-unlock.com'],
+      ['Arolinks', 'arolinks.com'],
+      ['Tpi.li', 'tpi.li'],
+      ['Linkify', 'go.linkify.ru'],
+      ['Boostellar', 'bstlar.com'],
+      ['Scriptpastebins', 'scriptpastebins.com'],
+      ['Bstshrt', 'bstshrt.com'],
+      ['Sfl.gl', 'sfl.gl'],
+      ['Yorurl', 'go.yorurl.com, yorurl.com'],
+      ['Robloxscripts', 'robloxscripts.gg'],
+      ['Loanbuzz', 'lnbz.la'],
+      ['Linkzy', 'linkzy.space'],
+      ['Ez4Short', 'ez4short.com'],
+      ['Cuty.io', 'cuty.io, cety.io'],
+      ['Boost.ink', 'boost.ink'],
+      ['Adfoc.us', 'adfoc.us'],
+      ['Mendationforc', 'mendationforc.info'],
+    ],
+  },
+  {
+    name: 'Social Unlocks',
+    description: 'Services requiring subscriptions or likes.',
+    count: 10,
+    services: [
+      ['Rekonise', 'rekonise.com, rekonise.org, rkns.link'],
+      ['Socialwolvez', 'socialwolvez.com'],
+      ['Mboost', 'mboost.me, bst.gg, booo.st'],
+      ['Social-unlock', 'social-unlock.com'],
+      ['Sub2Unlock', 'sub2unlock.com, sub2unlock.me, sub2unlock.io, +1 more'],
+      ['Sub4Unlock', 'sub4unlock.com, sub4unlock.me, sub4unlock.io, +1 more'],
+      ['Sub2Get', 'sub2get.com'],
+      ['Subfinal', 'subfinal.com'],
+      ['Unlocknow', 'unlocknow.net'],
+      ['Ytsubme', 'ytsubme.com'],
+    ],
+  },
+  {
+    name: 'Paste Sites',
+    description: 'Text storage sites used for scripts.',
+    count: 9,
+    services: [
+      ['Pastebin', 'pastebin.com'],
+      ['Paste-Drop', 'paste-drop.com'],
+      ['Pastefy', 'pastefy.app'],
+      ['Paster.so', 'paster.so, paster.gg'],
+      ['Justpaste.it', 'justpaste.it'],
+      ['Pastecanyon', 'pastecanyon.com'],
+      ['Pastehill', 'pastehill.com'],
+      ['Pastemode', 'pastemode.com'],
+      ['Rentry', 'rentry.org, rentry.co'],
+    ],
+  },
+  {
+    name: 'URL Shorteners',
+    description: 'Standard redirect shorteners we decode.',
+    count: 12,
+    services: [
+      ['Bit.ly', 'bit.ly'],
+      ['Cl.gy', 'cl.gy'],
+      ['Goo.gl', 'goo.gl'],
+      ['Is.Gd', 'is.gd'],
+      ['Rebrand.ly', 'rebrand.ly'],
+      ['Shorter.me', 'shorter.me'],
+      ['T.co', 't.co'],
+      ['T.ly', 't.ly'],
+      ['Tiny.cc', 'tiny.cc'],
+      ['Tinylink', 'tinylink.onl'],
+      ['Tinyurl', 'tinyurl.com'],
+      ['V.gd', 'v.gd'],
+    ],
+  },
+];
+
+const TOTAL_SUPPORTED_SERVICES = SUPPORTED_CATEGORIES.reduce((sum, category) => sum + category.count, 0);
 
 function extractUrls(text) {
   const matches = text.match(/https?:\/\/[^\s<>()]+/gi) || [];
@@ -394,8 +495,32 @@ function formatBypassFailure(url, err) {
 
   return [
     `couldnt bypass ${url}: unsupported or failed`,
-    SUPPORTED_LINKS_TEXT,
+    'run /supported for the full list of supported links',
   ].join('\n');
+}
+
+function buildSupportedEmbeds() {
+  const summary = new EmbedBuilder()
+    .setTitle('Supported links')
+    .setDescription([
+      `BypassTools supports ${TOTAL_SUPPORTED_SERVICES} services across ${SUPPORTED_CATEGORIES.length} categories.`,
+      'Use these for ad-links, key systems, social unlocks, paste sites, and shorteners.',
+      'Normal pages like Tenor gifs, YouTube videos, or random websites are not bypass targets.',
+    ].join('\n'))
+    .setColor(0x2f80ed);
+
+  const categoryEmbeds = SUPPORTED_CATEGORIES.map(category => {
+    const list = category.services
+      .map(([name, domains]) => `**${name}**\n${domains}`)
+      .join('\n\n');
+
+    return new EmbedBuilder()
+      .setTitle(`${category.name} (${category.count})`)
+      .setDescription(`${category.description}\n\n${list}`)
+      .setColor(0x2f80ed);
+  });
+
+  return [summary, ...categoryEmbeds];
 }
 
 function formatBypassResult(result) {
@@ -578,6 +703,14 @@ client.on('interactionCreate', async (interaction) => {
 
   if (!interaction.isChatInputCommand()) return;
 
+  if (interaction.commandName === 'supported') {
+    return interaction.reply({
+      embeds: buildSupportedEmbeds(),
+      ephemeral: true,
+      allowedMentions: { parse: [] },
+    });
+  }
+
   if (interaction.commandName === 'bypass') {
     const link = interaction.options.getString('link', true);
     const refresh = interaction.options.getBoolean('refresh') ?? false;
@@ -637,6 +770,10 @@ client.on('ready', async () => {
         )
         .toJSON(),
       new SlashCommandBuilder()
+        .setName('supported')
+        .setDescription('Show all supported BypassTools link types')
+        .toJSON(),
+      new SlashCommandBuilder()
         .setName('set-ticket-message')
         .setDescription('Set the message QuackQuack sends when a new ticket opens')
         .addStringOption(opt =>
@@ -648,7 +785,7 @@ client.on('ready', async () => {
         .toJSON(),
     ];
     await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-    console.log('Slash commands registered: /bypass, /set-ticket-message');
+    console.log('Slash commands registered: /bypass, /supported, /set-ticket-message');
   } catch (err) {
     console.error('Failed to register slash command:', err);
   }

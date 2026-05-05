@@ -29,9 +29,10 @@ npm start
 - Users can run `/bypass link:<url>` to bypass a supported link.
 - Use `/bypass link:<url> refresh:true` to skip the BypassTools cache.
 - Successful bypasses include a `Mobile copy` button that privately shows the raw URL to the requester.
-- Unsupported or failed links show examples of supported link types.
+- Unsupported or failed links tell users to run `/supported`.
+- `/supported` shows the full supported-service list in grouped embeds.
 
-BypassTools is for ad-link, key-system, and social-unlock services. Examples include Linkvertise, LootLabs/LootLinks/loot.link, Work.ink, Delta Executor keys, Hydrogen, Luarmor, Lockr.so, Rapid-Links, shortlinks, and other key systems. Normal media pages like Tenor gifs are not bypass targets.
+BypassTools is for ad-link, key-system, social-unlock, paste, and shortener services. Normal media pages like Tenor gifs are not bypass targets.
 
 ## Chatlog Style Examples
 
@@ -46,4 +47,5 @@ These examples are used in the system prompt as style guidance, not real model t
 ## Commands
 
 - `/bypass` bypasses a supported link.
+- `/supported` shows all supported BypassTools link types.
 - `/set-ticket-message` updates the ticket greeting. Admin only.
